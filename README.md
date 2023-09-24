@@ -17,10 +17,13 @@
 
 ## News or Update
 
+- 2023-08-23 - (News) - 🤗 Transformers, optimum and peft have integrated `auto-gptq`, so now running and training GPTQ models can be more available to everyone! See [this blog](https://huggingface.co/blog/gptq-integration) and it's resources for more details!
+- 2023-08-21 - (News) - Team of Qwen officially released 4bit quantized version of Qwen-7B based on `auto-gptq`, and provided [a detailed benchmark results](https://huggingface.co/Qwen/Qwen-7B-Chat-Int4#%E9%87%8F%E5%8C%96-quantization)
+- 2023-08-06 - (Update) - Support exllama's q4 CUDA kernel to have at least 1.3x speed up for int4 quantized models when doing inference.
+- 2023-08-04 - (Update) - Support RoCm so that AMD GPU users can use auto-gptq with CUDA extensions.
+- 2023-07-26 - (Update) - An elegant [PPL benchmark script](examples/benchmark/perplexity.py) to get results that can be fairly compared with other libraries such as `llama.cpp`.
 - 2023-06-05 - (Update) - Integrate with 🤗 peft to use gptq quantized model to train adapters, support LoRA, AdaLoRA, AdaptionPrompt, etc.
 - 2023-05-30 - (Update) - Support download/upload quantized model from/to 🤗 Hub.
-- 2023-05-27 - (Update) - Support quantization and inference for `gpt_bigcode`, `codegen` and `RefineWeb/RefineWebModel`(falcon) model types.
-- 2023-05-04 - (Update) - Support using faster cuda kernel when `not desc_act or group_size == -1`.
 
 *For more histories please turn to [here](docs/NEWS_OR_UPDATE.md)*
 
@@ -28,7 +31,7 @@
 
 ### Inference Speed
 > The result is generated using [this script](examples/benchmark/generation_speed.py), batch size of input is 1, decode strategy is beam search and enforce the model to generate 512 tokens, speed metric is tokens/s (the larger, the better).
-> 
+>
 > The quantized model is loaded using the setup that can gain the fastest inference speed.
 
 | model         | GPU           | num_beams | fp16  | gptq-int4 |
@@ -49,36 +52,17 @@ For perplexity comparison, you can turn to [here](https://github.com/qwopqwop200
 ## Installation
 
 ### Quick Installation
-You can install the latest stable release of AutoGPTQ from pip:
-```shell
-pip install auto-gptq
-```
-Start from v0.2.0, you can download pre-build wheel that satisfied your environment setup from each version's release assets and install it to skip building stage for the fastest installation speed. For example:
-```shell
-# firstly, cd the directory where the wheel saved, then execute command below
-pip install auto_gptq-0.2.0+cu118-cp310-cp310-linux_x86_64.whl # install v0.2.0 auto_gptq pre-build wheel for linux in an environment whose python=3.10 and cuda=11.8
-```
-#### disable cuda extensions
-By default, cuda extensions will be installed when `torch` and `cuda` is already installed in your machine, if you don't want to use them, using:
-```shell
-BUILD_CUDA_EXT=0 pip install auto-gptq
-```
-And to make sure `autogptq_cuda` is not ever in your virtual environment, run:
-```shell
-pip uninstall autogptq_cuda -y
-```
+You can install the latest stable release of AutoGPTQ from pip with pre-built wheels compatible with PyTorch 2.0.1:
 
-#### to support triton speedup
-To integrate with `triton`, using:
-> warning: currently triton only supports linux; 3-bit quantization is not supported when using triton
+* For CUDA 11.7: `pip install auto-gptq`
+* For CUDA 11.8: `pip install auto-gptq --extra-index-url https://huggingface.github.io/autogptq-index/whl/cu118/`
+* For RoCm 5.4.2: `pip install auto-gptq --extra-index-url https://huggingface.github.io/autogptq-index/whl/rocm542/`
 
-```shell
-pip install auto-gptq[triton]
-```
+**Warning:** These wheels are not expected to work on PyTorch nightly. Please install AutoGPTQ from source when using PyTorch nightly.
+
+AutoGPTQ can be installed with the Triton dependency with `pip install auto-gptq[triton]` in order to be able to use the Triton backend (currently only supports linux, no 3-bits quantization).
 
 ### Install from source
-<details>
-<summary>click to see details</summary>
 
 Clone the source code:
 ```shell
@@ -86,20 +70,24 @@ git clone https://github.com/PanQiWei/AutoGPTQ.git && cd AutoGPTQ
 ```
 Then, install from source:
 ```shell
-pip install .
+pip install -v .
 ```
-Like quick installation, you can also set `BUILD_CUDA_EXT=0` to disable pytorch extension building.
+You can set `BUILD_CUDA_EXT=0` to disable pytorch extension building, but this is **strongly discouraged** as AutoGPTQ then falls back on a slow python implementation.
 
-Use `.[triton]` if you want to integrate with triton and it's available on your operating system.
+To install from source for AMD GPUs supporting RoCm, please specify the `ROCM_VERSION` environment variable. The compilation can be speeded up by specifying the `PYTORCH_ROCM_ARCH` variable ([reference](https://github.com/pytorch/pytorch/blob/7b73b1e8a73a1777ebe8d2cd4487eb13da55b3ba/setup.py#L132)), for example `gfx90a` for MI200 series devices. Example:
 
-</details>
+```
+ROCM_VERSION=5.6 pip install -v .
+```
+
+For RoCm systems, the packages `rocsparse-dev`, `hipsparse-dev`, `rocthrust-dev`, `rocblas-dev` and `hipblas-dev` are required to build.
 
 ## Quick Tour
 
 ### Quantization and Inference
 > warning: this is just a showcase of the usage of basic apis in AutoGPTQ, which uses only one sample to quantize a much small model, quality of quantized model using such little samples may not good.
 
-Below is an example for the simplest use of `auto_gptq` to quantize a model and inference after quantization: 
+Below is an example for the simplest use of `auto_gptq` to quantize a model and inference after quantization:
 ```python
 from transformers import AutoTokenizer, TextGenerationPipeline
 from auto_gptq import AutoGPTQForCausalLM, BaseQuantizeConfig
@@ -122,7 +110,7 @@ examples = [
 quantize_config = BaseQuantizeConfig(
     bits=4,  # quantize model to 4-bit
     group_size=128,  # it is recommended to set the value to 128
-    desc_act=False,  # set to False can significantly speed up inference but the perplexity may slightly bad 
+    desc_act=False,  # set to False can significantly speed up inference but the perplexity may slightly bad
 )
 
 # load un-quantized model, by default, the model will always be loaded into CPU memory
@@ -137,7 +125,7 @@ model.save_quantized(quantized_model_dir)
 # save quantized model using safetensors
 model.save_quantized(quantized_model_dir, use_safetensors=True)
 
-# push quantized model to Hugging Face Hub. 
+# push quantized model to Hugging Face Hub.
 # to use use_auth_token=True, Login first via huggingface-cli login.
 # or pass explcit token with: use_auth_token="hf_xxxxxxx"
 # (uncomment the following three lines to enable this feature)
@@ -185,8 +173,8 @@ class OPTGPTQForCausalLM(BaseGPTQForCausalLM):
         "model.decoder.project_in", "model.decoder.final_layer_norm"
     ]
     # chained attribute names of linear layers in transformer layer module
-    # normally, there are four sub lists, for each one the modules in it can be seen as one operation, 
-    # and the order should be the order when they are truly executed, in this case (and usually in most cases), 
+    # normally, there are four sub lists, for each one the modules in it can be seen as one operation,
+    # and the order should be the order when they are truly executed, in this case (and usually in most cases),
     # they are: attention q_k_v projection, attention output projection, MLP project input, MLP project output
     inside_layer_modules = [
         ["self_attn.k_proj", "self_attn.v_proj", "self_attn.q_proj"],
@@ -257,14 +245,14 @@ task = SequenceClassificationTask(
             "num_samples": 1000,  # how many samples will be sampled to evaluation
             "sample_max_len": 1024,  # max tokens for each sample
             "block_max_len": 2048,  # max tokens for each data block
-            # function to load dataset, one must only accept data_name_or_path as input 
+            # function to load dataset, one must only accept data_name_or_path as input
             # and return datasets.Dataset
-            "load_fn": partial(datasets.load_dataset, name="english"),  
-            # function to preprocess dataset, which is used for datasets.Dataset.map, 
+            "load_fn": partial(datasets.load_dataset, name="english"),
+            # function to preprocess dataset, which is used for datasets.Dataset.map,
             # must return Dict[str, list] with only two keys: [prompt_col_name, label_col_name]
-            "preprocess_fn": ds_refactor_fn,  
+            "preprocess_fn": ds_refactor_fn,
             # truncate label when sample's length exceed sample_max_len
-            "truncate_prompt": False  
+            "truncate_prompt": False
         }
     )
 
@@ -293,7 +281,7 @@ print(
 ## Supported Models
 
 > you can use `model.config.model_type` to compare with the table below to check whether the model you use is supported by `auto_gptq`.
-> 
+>
 > for example, model_type of `WizardLM`, `vicuna` and `gpt4all` are all `llama`, hence they are all supported by `auto_gptq`.
 
 | model type                         | quantization | inference | peft-lora | peft-ada-lora | peft-adaption_prompt                                                                            |
@@ -311,6 +299,14 @@ print(
 
 ## Supported Evaluation Tasks
 Currently, `auto_gptq` supports: `LanguageModelingTask`, `SequenceClassificationTask` and `TextSummarizationTask`; more Tasks will come soon!
+
+## Running tests
+
+Tests can be run with:
+
+```
+pytest tests/ -s
+```
 
 ## Acknowledgement
 - Specially thanks **Elias Frantar**, **Saleh Ashkboos**, **Torsten Hoefler** and **Dan Alistarh** for proposing **GPTQ** algorithm and open source the [code](https://github.com/IST-DASLab/gptq).

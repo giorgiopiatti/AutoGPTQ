@@ -14,11 +14,14 @@ try:
     _autogptq_cuda_available = True
 except ImportError:
     logger.warning('CUDA extension not installed.')
+    autogptq_cuda_256 = None
+    autogptq_cuda_64 = None
     _autogptq_cuda_available = False
 
 
-
 class QuantLinear(nn.Module):
+    QUANT_TYPE = "cuda"
+
     def __init__(
         self,
         bits,
@@ -31,7 +34,6 @@ class QuantLinear(nn.Module):
     ):
         super().__init__()
         global _autogptq_cuda_available
-
         if bits not in [2, 3, 4, 8]:
             raise NotImplementedError("Only 2,3,4,8 bits are supported.")
         if trainable:
@@ -87,6 +89,9 @@ class QuantLinear(nn.Module):
             self.autogptq_cuda_available = False
 
         self.trainable = trainable
+    
+    def post_init(self):
+        pass
 
     def pack(self, linear, scales, zeros, g_idx=None):
         W = linear.weight.data.clone()
@@ -200,7 +205,7 @@ class QuantLinear(nn.Module):
             elif self.bits == 3:
                 self.autogptq_cuda.vecquant3matmul(x.float(), self.qweight, out, self.scales.float(), self.qzeros, self.g_idx)
             elif self.bits == 4:
-                self.autogptq_cuda.vecquant4matmul(x.half(), self.qweight, out.half(), self.scales, self.qzeros, self.g_idx, self.infeatures // 2)
+                self.autogptq_cuda.vecquant4matmul(x.float(), self.qweight, out, self.scales.float(), self.qzeros, self.g_idx)
             elif self.bits == 8:
                 self.autogptq_cuda.vecquant8matmul(x.float(), self.qweight, out, self.scales.float(), self.qzeros, self.g_idx)
             else:

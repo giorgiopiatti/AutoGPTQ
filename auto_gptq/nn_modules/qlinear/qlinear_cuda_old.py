@@ -13,10 +13,14 @@ try:
     _autogptq_cuda_available = True
 except ImportError:
     logger.warning('CUDA extension not installed.')
+    autogptq_cuda_256 = None
+    autogptq_cuda_64 = None
     _autogptq_cuda_available = False
 
 
 class QuantLinear(nn.Module):
+    QUANT_TYPE = "cuda-old"
+
     def __init__(
         self,
         bits,
@@ -87,6 +91,9 @@ class QuantLinear(nn.Module):
             self.autogptq_cuda_available = False
 
         self.trainable = trainable
+
+    def post_init(self):
+        pass
 
     def pack(self, linear, scales, zeros, g_idx):
         W = linear.weight.data.clone()
